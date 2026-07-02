@@ -258,7 +258,9 @@ class BiliBiliCheckIn(object):
                 "title": one.get("title"),
                 "owner": one.get("owner", {}).get("name"),
             }
-            for one in ret.get("data", {}).get("archives", [])
+            # 使用 or {} 确保即使 "data" 的值为 None 也会回退到空字典
+data = ret.get("data") or {}
+for one in data.get("archives", []):
         ]
         return data_list
 
