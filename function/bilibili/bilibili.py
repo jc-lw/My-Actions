@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import os
+import requests
 
 sys.path.append("My-Actions/function/bilibili/")
 from bilibiliapi import *
@@ -224,7 +226,7 @@ class BiliBiliCheckIn(object):
         """B站直播获取金银瓜子状态"""
         url = "https://api.live.bilibili.com/pay/v1/Exchange/getStatus"
         ret = session.get(url=url).json()
-        data = ret.get("data")
+        data = ret.get("data") or {}
         silver = data.get("silver", 0)
         gold = data.get("gold", 0)
         coin = data.get("coin", 0)
@@ -243,7 +245,7 @@ class BiliBiliCheckIn(object):
         return ret
 
     @staticmethod
-    def get_region(session, rid=1, num=6) -> dict:
+    def get_region(session, rid=1, num=6) -> list:
         """
         获取 B站分区视频信息
         rid int 分区号
@@ -251,6 +253,12 @@ class BiliBiliCheckIn(object):
         """
         url = "https://api.bilibili.com/x/web-interface/dynamic/region?ps=" + str(num) + "&rid=" + str(rid)
         ret = session.get(url=url).json()
+        
+        # 提取 data 和 archives 并确保它们不为 None
+        data = ret.get("data") or {}
+        archives = data.get("archives") or []
+        
+        # 执行列表推导式
         data_list = [
             {
                 "aid": one.get("aid"),
@@ -258,9 +266,7 @@ class BiliBiliCheckIn(object):
                 "title": one.get("title"),
                 "owner": one.get("owner", {}).get("name"),
             }
-            # 使用 or {} 确保即使 "data" 的值为 None 也会回退到空字典
-data = ret.get("data") or {}
-for one in data.get("archives", []):
+            for one in archives
         ]
         return data_list
 
@@ -309,20 +315,17 @@ for one in data.get("archives", []):
                     vip_privilege_receive_ret = self.vip_privilege_receive(session=session,bili_jct=bili_jct,receive_type=welfare.get("type"))
                     print(vip_privilege_receive_ret) # 取消本段输出
             reward_ret = self.reward(session=session)
-            coins_av_count = reward_ret.get("data", {}).get("coins") // 10
+            coins_av_count = reward_ret.get("data", {}).get("coins", 0) // 10
             coin_num = coin_num - coins_av_count
             coin_num = coin_num if coin_num < coin else coin
             if coin_type == 1 and coin_num:
                 following_list = self.get_followings(session=session, uid=uid)
-                for following in following_list.get("data", {}).get("list"):
+                for following in following_list.get("data", {}).get("list", []):
                     mid = following.get("mid")
                     if mid:
                         aid_list += self.space_arc_search(session=session, uid=mid)
             if coin_num > 0:
                 for aid in aid_list[::-1]:
-                    # print(f'成功给{aid.get("title")}投一个币')
-                    # coin_num -= 1
-                    # success_count += 1
                     ret = self.coin_add(session=session, aid=aid.get("aid"), bili_jct=bili_jct)
                     if ret["code"] == 0:
                         coin_num -= 1
@@ -331,7 +334,6 @@ for one in data.get("archives", []):
                     elif ret["code"] == 34005:
                         print(f'投币{aid.get("title")}失败，原因为{ret["message"]}')
                         continue
-                        # -104 硬币不够了 -111 csrf 失败 34005 投币达到上限
                     else:
                         print(f'投币{aid.get("title")}失败，原因为{ret["message"]}，跳过投币')
                         break
@@ -342,22 +344,29 @@ for one in data.get("archives", []):
             else:
                 coin_msg = f"今日成功投币{coins_av_count}/{coin_type}个"
                 print(coin_msg)
-            aid = aid_list[0].get("aid")
-            cid = aid_list[0].get("cid")
-            title = aid_list[0].get("title")
-            report_ret = self.report_task(session=session, bili_jct=bili_jct, aid=aid, cid=cid)
-            if report_ret.get("code") == 0:
-                report_msg = f"观看《{title}》300秒"
-            else:
-                report_msg = f"任务失败"
+                
+            if aid_list:
+                aid = aid_list[0].get("aid")
+                cid = aid_list[0].get("cid")
+                title = aid_list[0].get("title")
+                report_ret = self.report_task(session=session, bili_jct=bili_jct, aid=aid, cid=cid)
+                if report_ret.get("code") == 0:
+                    report_msg = f"观看《{title}》300秒"
+                else:
+                    report_msg = f"任务失败"
                 print(report_msg)
-            print(report_msg)
-            share_ret = self.share_task(session=session, bili_jct=bili_jct, aid=aid)
-            if share_ret.get("code") == 0:
-                share_msg = f"分享《{title}》成功"
+                share_ret = self.share_task(session=session, bili_jct=bili_jct, aid=aid)
+                if share_ret.get("code") == 0:
+                    share_msg = f"分享《{title}》成功"
+                else:
+                    share_msg = f"分享失败"
+                    print(share_msg)
             else:
-                share_msg = f"分享失败"
+                report_msg = "无可看视频，跳过观看任务"
+                share_msg = "无可分享视频，跳过分享任务"
+                print(report_msg)
                 print(share_msg)
+
             if silver2coin:
                 silver2coin_ret = self.silver2coin(session=session, bili_jct=bili_jct)
                 if silver2coin_ret["code"] == 0:
@@ -369,7 +378,7 @@ for one in data.get("archives", []):
                 silver2coin_msg = f"未开启银瓜子兑换硬币功能"
             live_stats = self.live_status(session=session)
             uname, uid, is_login, new_coin, vip_type, new_current_exp = self.get_nav(session=session)
-            # print(uname, uid, is_login, new_coin, vip_type, new_current_exp)
+            
             reward_ret = self.reward(session=session)
             login = reward_ret.get("data", {}).get("login")
             watch_av = reward_ret.get("data", {}).get("watch")
